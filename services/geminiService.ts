@@ -1,14 +1,15 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { type WeeklyData, type DocumentData } from '../types.ts';
 
-// IMPORTANT: This key is managed by the environment and must not be hardcoded.
-// The app assumes `process.env.API_KEY` is available at runtime.
+// This is the standard way to access environment variables that are injected
+// by a build tool like Vite. Vercel will replace this with your secret key.
+// IMPORTANT: Ensure your environment variable in Vercel is named API_KEY (not VITE_API_KEY).
 const API_KEY = process.env.API_KEY;
 
 if (!API_KEY) {
-  // In a real app, you might want to handle this more gracefully.
-  // For this context, we'll throw an error if the key isn't set.
-  throw new Error("API_KEY environment variable not set.");
+  // This error will be thrown if the environment variable is missing.
+  throw new Error("API_KEY environment variable not set. Please ensure you have an environment variable named 'API_KEY' in your Vercel project settings.");
 }
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
