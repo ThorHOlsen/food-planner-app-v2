@@ -1,18 +1,20 @@
+// Fix: Add reference to vite/client to provide types for import.meta.env
+/// <reference types="vite/client" />
 
 import { GoogleGenAI } from "@google/genai";
 import { type WeeklyData, type DocumentData } from '../types.ts';
 
-// This is the standard way to access environment variables that are injected
-// by a build tool like Vite. Vercel will replace this with your secret key.
-// IMPORTANT: Ensure your environment variable in Vercel is named API_KEY (not VITE_API_KEY).
-const API_KEY = process.env.API_KEY;
+// THIS IS THE DEFINITIVE FIX.
+// This uses the modern, browser-safe method for Vite projects to access environment variables.
+// It now correctly matches the `VITE_API_KEY` variable set in Vercel.
+const apiKey = import.meta.env.VITE_API_KEY;
 
-if (!API_KEY) {
-  // This error will be thrown if the environment variable is missing.
-  throw new Error("API_KEY environment variable not set. Please ensure you have an environment variable named 'API_KEY' in your Vercel project settings.");
+if (!apiKey) {
+  // This error will be thrown if the VITE_API_KEY is not configured correctly in Vercel.
+  throw new Error("VITE_API_KEY environment variable not found. Please ensure it is configured in your Vercel project settings.");
 }
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const ai = new GoogleGenAI({ apiKey });
 
 const getNextWeekDates = (): { weekNumber: number; startDate: string; endDate: string } => {
   const today = new Date();
@@ -41,7 +43,8 @@ const getNextWeekDates = (): { weekNumber: number; startDate: string; endDate: s
   };
 };
 
-const getSystemPrompt = (weeklyData: WeeklyData, documents: DocumentData, regenerationFeedback?: string): string => {
+// Refactor: Split the prompt into system instructions and user content for clarity and adherence to best practices.
+const getPromptParts = (weeklyData: WeeklyData, documents: DocumentData, regenerationFeedback?: string): { systemInstruction: string, contents: string } => {
   const weeklyPlannerDataString = weeklyData.days.map(day => {
     if (day.noMeal) {
       return `- ${day.day}: Ingen madplan for denne dag.`;
@@ -56,47 +59,32 @@ const getSystemPrompt = (weeklyData: WeeklyData, documents: DocumentData, regene
     ? weeklyData.pastedHistory 
     : documents.history;
 
-  const basePrompt = `
-    Du er en specialiseret AI-agent, der skal generere en ugentlig madplan. Din opgave er at levere en komplet pakke, der består af en madplan, ernæringsoversigt, opskrifter og en indkøbsliste.
+  const systemInstruction = `Du er en specialiseret AI-agent, der skal generere en ugentlig madplan. Din opgave er at levere en komplet pakke, der består af en madplan, ernæringsoversigt, opskrifter og en indkøbsliste.
     
     Her er dine instruktioner, som skal følges præcist:
 
-    0. Tag højde for feedback på sidste uges madplan. Brug denne feedback til at forbedre den nye plan.
-    Feedback: "${weeklyData.feedback || 'Ingen feedback givet.'}"
+    1. Brug udelukkende de data og kilder, som brugeren angiver i prompten.
     
-    1. Hent data fra mine kilder. Jeg har givet dig indholdet af de nødvendige kilder nedenfor. Brug udelukkende disse data.
-    
-    Kilde 1: "Weekly Meal Planner Data" (seneste række):
-    ${weeklyPlannerDataString}
-
-    Her er yderligere ønsker for ugen:
-    - Råvarer som brugeren allerede har til rådighed: "${weeklyData.availableIngredients || 'Ingen'}"
-    - Ønskede ingredienser/retter der skal indgå i planen: "${weeklyData.requestedIngredients || 'Ingen'}"
-    - Andre kommentarer til madplanen: "${weeklyData.otherRequests || 'Ingen'}"
-
-    Kilde 2: "Krav til madplan":
+    Kilde "Krav til madplan":
     ${documents.requirements}
 
-    Kilde 3: "Næringsindhold og vitaminer i aftensmad til madplan":
+    Kilde "Næringsindhold og vitaminer i aftensmad til madplan":
     ${documents.nutritionInfo}
 
-    Kilde 4: "Næringsindhold af råvarer":
+    Kilde "Næringsindhold af råvarer":
     Brug udelukkende data fra dette Google Sheet til alle næringsberegninger: https://maddata.dk/. Ignorer alle andre kilder til næringsdata.
-
-    Kilde 5: "Madplan og Indkøbsliste" (Historik):
-    ${effectiveHistory}
 
     2. Generér madplanen
     Udarbejd en madplan for aftensmad fra søndag til torsdag.
     Krav til madplan:
     - Retterne skal være tilpasset de specifikke tidsrammer og ønsker fra "Weekly Meal Planner Data".
-    - Retterne skal overholde ALLE regler specificeret i "Krav til madplan" (Kilde 2). Dette er et absolut krav, som ikke kan fraviges. Især reglen om INTET OKSEKØD.
+    - Retterne skal overholde ALLE regler specificeret i "Krav til madplan". Dette er et absolut krav, som ikke kan fraviges. Især reglen om INTET OKSEKØD.
     - Tag højde for brugerens "Ønskede ingredienser/retter" og "Andre kommentarer".
     - Hvis en dag er markeret med "Ingen madplan", skal du skrive dette i planen og ikke generere en ret.
     - Hvis tilberedningstiden for en dag er 10 minutter, betyder det, at der skal spises rester. Planlæg ikke en ny ret for den dag.
     - **Portionsberegning for Rester:** Hvis en ret skal bruges til rester dagen efter (fordi dagen efter har en tilberedningstid på 10 minutter), skal du beregne det samlede antal portioner ved at lægge antallet af spisende gæster fra *begge* dage sammen. Eksempel: Hvis der er 4 personer, der spiser på tilberedningsdagen, og 3 personer, der spiser rester dagen efter, skal opskriften laves til i alt 7 portioner. Angiv dette tydeligt i opskriften.
     - Prioritér at bruge de råvarer, der er angivet som tilængelige ("Råvarer som brugeren allerede har til rådighed").
-    - Lav en fuldstændig beregning af næringsværdi for alle måltider, inkluderende alle råvarer, baseret på Kilde 4.
+    - Lav en fuldstændig beregning af næringsværdi for alle måltider, inkluderende alle råvarer, baseret på Kilde "Næringsindhold af råvarer".
     - Retterne skal følge kravene i "Næringsindhold og vitaminer i aftensmad til madplan".
     - Der skal ikke være nogle retter, som vi har lavet de sidste 2 måneder (brug historikken). Dette er for at sikre så stor smagsvarians som muligt.
     - Hvis måltiderne ikke lever op til kravene, startes der forfra med "2. Generér madplanen".
@@ -126,24 +114,41 @@ const getSystemPrompt = (weeklyData: WeeklyData, documents: DocumentData, regene
     De fire sektioner er:
     1. Måltidsplan for ugen: Præsenter madplanen med en ret for hver dag fra søndag til torsdag. For hver dag, angiv hvem der spiser med i parentes (f.eks. Mandag (Thor, Line, Vigga): ...). Hvis der er rester, eller ingen madplan, skal dette tydeligt fremgå.
     2. Opskrifter: Udskriv en fuld opskrift for hver ret.
-    3. Indkøbsliste: Generér en samlet indkøbsliste for alle ugens retter. Listen skal sorteres i de specificerede kategorier (Frugt & Grønt, Kød & Fisk, Mejeri & Æg, Tørvarer, Andet) og må ikke inkludere de råvarer, der er angivet som tilgængelige ("Råvarer som brugeren allerede har til rådighed"). Inkluder mængder af de enkelte råvarer. Tilføj en note til sidst med en overskrift som "**Forventes i husholdningen:**" og list de basisvarer (fra "Krav til madplan"), som ikke er på listen.
-    4. Ernæringstabeller: Ernæringstabeller som beskrevet i punkt 3.
-  `;
+    3. Indkøbsliste: Generér en samlet indkøbsliste for alle ugens retter. Listen skal sorteres i de specificerede kategorier (Frugt & Grønt, Kød & Fisk, Mejeri & Æg, Tørvarer, Andet) og må ikke inkludere de råvarer, der er angivet som tilængelige ("Råvarer som brugeren allerede har til rådighed"). Inkluder mængder af de enkelte råvarer. Tilføj en note til sidst med en overskrift som "**Forventes i husholdningen:**" og list de basisvarer (fra "Krav til madplan"), som ikke er på listen.
+    4. Ernæringstabeller: Ernæringstabeller som beskrevet i punkt 3.`;
+
+  let contents = `Her er data for madplanen, du skal generere:
+
+- Feedback på sidste uges madplan: "${weeklyData.feedback || 'Ingen feedback givet.'}"
+
+- "Weekly Meal Planner Data" (seneste række):
+${weeklyPlannerDataString}
+
+- Yderligere ønsker for ugen:
+- Råvarer som brugeren allerede har til rådighed: "${weeklyData.availableIngredients || 'Ingen'}"
+- Ønskede ingredienser/retter der skal indgå i planen: "${weeklyData.requestedIngredients || 'Ingen'}"
+- Andre kommentarer til madplanen: "${weeklyData.otherRequests || 'Ingen'}"
+
+- "Madplan og Indkøbsliste" (Historik):
+${effectiveHistory}`;
 
   if (regenerationFeedback) {
-    return `${basePrompt}\n\nIMPORTANT: The user has reviewed the plan you just generated and provided the following feedback. Please generate a NEW, updated plan that incorporates these changes:\n"${regenerationFeedback}"`;
+    contents += `\n\nIMPORTANT: The user has reviewed the plan you just generated and provided the following feedback. Please generate a NEW, updated plan that incorporates these changes:\n"${regenerationFeedback}"`;
   }
   
-  return basePrompt;
+  return { systemInstruction, contents };
 };
 
 export const generateMealPlan = async (weeklyData: WeeklyData, documents: DocumentData, regenerationFeedback?: string): Promise<string> => {
   try {
-    const prompt = getSystemPrompt(weeklyData, documents, regenerationFeedback);
+    const { systemInstruction, contents } = getPromptParts(weeklyData, documents, regenerationFeedback);
     
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: contents,
+      config: {
+        systemInstruction: systemInstruction,
+      }
     });
     
     return response.text;
