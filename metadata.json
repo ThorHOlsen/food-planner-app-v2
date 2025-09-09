@@ -1,0 +1,5 @@
+{
+  "name": "AI Weekly Meal Planner",
+  "description": "An AI agent app that generates a weekly meal plan, shopping list, recipes, and nutritional information based on your weekly needs and available ingredients.",
+  "requestFramePermissions": []
+}
